@@ -6,16 +6,10 @@ import datetime
 
 # You will need EXOAnalysis configured with curl; this requires some curl development package, like libcurl4-gnutls-dev.
 
-'''
 # You will need python-mysqldb installed to use the MySQLdb module.
 # This database will have information like prescale, but I haven't had a chance yet to work on it.
 import MySQLdb
-daqdb_connection = MySQLdb.connect(hostname = "exodb01.slac.stanford.edu",
-                                   port = "3606",
-                                   user = "online",
-                                   password = "exo_online",
-                                   db = "exoddb")
-'''
+daqdb_connection = None # Form connection in a lazy way -- only as needed.
 
 ###############################################################################
 # User functions -- generally you'll only call these.                         #
@@ -48,11 +42,26 @@ def GetStartTimeOfRun(runNo):
     return startTime
 
 def GetWeekOfRun(runNo):
-    """ Return the week index of this run."""
+    """Return the week index of this run."""
     runNo = int(runNo)
     runTime = GetStartTimeOfRun(runNo)
     return GetWeekOfDate(runTime)
 
+'''
+def GetTriggerOfRun(runNo):
+    """Get the trigger information for runNo.
+
+    Return a dictionary with keys:
+      uwire_individual
+      uwire_sum
+      vwire_individual
+      vwire_sum
+      apd_individual
+      apd_sum
+      solicited
+    Only the keys which correspond to triggers actually employed will be included.
+    The value from each key will be a dictionary to properties
+'''
 ###############################################################################
 # Utility functions -- usually you wouldn't call these (though you can).      #
 ###############################################################################
@@ -114,4 +123,27 @@ def GetWeekOfDate(time):
 # Only initialize these guys once, and only when GetWeekOfDate is first called.
 GetWeekOfDate.MandatoryWeekBreaks = None
 
+def GetPhysicsTriggerFileOfRun(runNo):
+    """Get the trigger configuration file as a string.  Needs to be parsed as XML."""
+    runNo = int(runNo)
 
+    # Create connection if necessary.
+    global daqdb_connection
+    if daqdb_connection == None:
+        daqdb_connection = MySQLdb.connect(host = "exodb01.slac.stanford.edu",
+                                           port = 3606,
+                                           user = "online",
+                                           passwd = "exo_online",
+                                           db = "exoddb")
+    cursor = daqdb_connection.cursor()
+    cursor.execute('SELECT configFile.file ' +
+                   'FROM runConfig LEFT JOIN configFile ' +
+                   'ON runConfig.configInstance = configFile.configFile ' +
+                   'WHERE runConfig.configType = 0 AND runConfig.configIndex = 0 ' +
+                   'AND runConfig.runIndex = %s', str(runNo))
+    if cursor.rowcount != 1:
+        raise MySQLdb.DataError(('We found %i rows for run %i; expected exactly one.\n' +
+                                 'Probably this run was not a physics-trigger run.\n' +
+                                 '\t(Ie noise, laser, charge injection, which are handled differently.)')
+                                % (cursor.rowcount, runNo))
+    return cursor.fetchone()[0]
